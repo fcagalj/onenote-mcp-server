@@ -7,7 +7,8 @@
         "run", "python", "onenote_mcp_server.py"
       ],
       "env": {
-        "AZURE_CLIENT_ID": "YOUR_AZURE_CLIENT_ID_HERE"
+        "AZURE_CLIENT_ID": "YOUR_AZURE_CLIENT_ID_HERE",
+        "ONENOTE_ENABLE_WRITE": "false"
       }
     }
   }

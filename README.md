@@ -7,6 +7,7 @@ A complete, robust Model Context Protocol (MCP) server for Microsoft OneNote int
 Transform your OneNote notebooks into an AI-accessible knowledge base:
 - **List all your notebooks, sections, and pages**
 - **Read page content** for analysis and search
+- **Read-only by default** for safer first-time setup
 - **Natural language queries** like "Show me my DevOps notes" or "Find pages about project planning"
 - **Secure OAuth authentication** with Microsoft Graph API
 - **Bulletproof error handling** with detailed debugging
@@ -64,8 +65,8 @@ Still in your Azure app:
 2. Select **Microsoft Graph** → **Delegated permissions**
 3. Add these permissions:
    - `Notes.Read` - Read OneNote notebooks
-   - `Notes.ReadWrite` - Create/modify OneNote content (optional but recommended)
    - `User.Read` - Read user profile
+   - `Notes.ReadWrite` - Create/modify OneNote content (optional; only needed when write mode is enabled)
 4. Click **Grant admin consent** (the button at the top)
 
 ### 5. Configure Claude Desktop
@@ -94,6 +95,8 @@ Add this configuration (replace `/ABSOLUTE/PATH/TO/PARENT/FOLDER/weather` with y
 }
 ```
 
+The default configuration is read-only and requests only `Notes.Read` and `User.Read` scopes.
+
 **With explicit token caching control:**
 ```json
 {
@@ -114,6 +117,31 @@ Add this configuration (replace `/ABSOLUTE/PATH/TO/PARENT/FOLDER/weather` with y
 ```
 
 Replace `/FULL/PATH/TO/onenote-mcp-server` with the actual path to this project.
+
+### Codex and Other MCP Clients
+
+For MCP clients that accept the standard `mcpServers` JSON shape, you can use `mcp_config.example.json` as a starting point. It points directly at the local virtual environment Python executable, which avoids relying on `uv` being available in the GUI app's PATH.
+
+**Enable OneNote write tools:**
+```json
+{
+  "mcpServers": {
+    "onenote": {
+      "command": "uv",
+      "args": [
+        "--directory", "/FULL/PATH/TO/onenote-mcp-server",
+        "run", "python", "onenote_mcp_server.py"
+      ],
+      "env": {
+        "AZURE_CLIENT_ID": "your-azure-client-id-here",
+        "ONENOTE_ENABLE_WRITE": "true"
+      }
+    }
+  }
+}
+```
+
+When `ONENOTE_ENABLE_WRITE=true`, the server requests `Notes.ReadWrite` and enables tools that create or update notebooks, sections, and pages. If you previously authenticated in read-only mode, clear the token cache and authenticate again so Microsoft can grant the expanded scope.
 
 ### 6. Restart Claude Desktop
 Completely quit and restart Claude Desktop. You should see OneNote tools in the 🔨 menu.
@@ -156,6 +184,14 @@ By default, authentication tokens are cached securely on your local machine so y
 **Token caching options:**
 - `ONENOTE_CACHE_TOKENS=true` (default) - Tokens persist across sessions
 - `ONENOTE_CACHE_TOKENS=false` - Authenticate every session (more secure)
+
+### Write Access
+
+Write access is disabled by default. This is intentional so the first run can safely inspect your OneNote data without granting modification permissions.
+
+**Write access options:**
+- `ONENOTE_ENABLE_WRITE=false` (default) - Read-only mode; create/update tools return a permissions error
+- `ONENOTE_ENABLE_WRITE=true` - Requests `Notes.ReadWrite` and enables create/update tools
 
 ## 📖 Usage Examples
 
