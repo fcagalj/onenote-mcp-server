@@ -10,6 +10,7 @@ import os
 import asyncio
 import json
 import logging
+from html import escape
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import time
@@ -26,11 +27,13 @@ mcp = FastMCP("OneNote MCP Server")
 
 # Microsoft Graph API constants
 GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
-SCOPES = [
+READ_SCOPES = [
     "https://graph.microsoft.com/Notes.Read",
-    "https://graph.microsoft.com/Notes.ReadWrite",
     "https://graph.microsoft.com/User.Read"
 ]
+WRITE_SCOPE = "https://graph.microsoft.com/Notes.ReadWrite"
+WRITE_ACCESS_ENABLED = os.getenv("ONENOTE_ENABLE_WRITE", "false").lower() in ("true", "1", "yes")
+SCOPES = READ_SCOPES + ([WRITE_SCOPE] if WRITE_ACCESS_ENABLED else [])
 
 # Token cache configuration
 TOKEN_CACHE_ENABLED = os.getenv("ONENOTE_CACHE_TOKENS", "true").lower() in ("true", "1", "yes")
@@ -226,6 +229,14 @@ async def ensure_valid_token() -> bool:
     access_token = None
     return False
 
+def require_write_access() -> None:
+    """Raise if write tools are disabled for this server process."""
+    if not WRITE_ACCESS_ENABLED:
+        raise PermissionError(
+            "Write access is disabled. Set ONENOTE_ENABLE_WRITE=true and re-authenticate "
+            "with Notes.ReadWrite permission to use this tool."
+        )
+
 # Global variable to store the current authentication flow
 current_flow = None
 
@@ -359,6 +370,7 @@ async def check_authentication() -> str:
     try:
         cache_status = "enabled" if TOKEN_CACHE_ENABLED else "disabled"
         cache_file_exists = TOKEN_CACHE_FILE.exists() if TOKEN_CACHE_ENABLED else False
+        write_status = "enabled" if WRITE_ACCESS_ENABLED else "disabled"
         
         if await ensure_valid_token():
             try:
@@ -372,6 +384,8 @@ async def check_authentication() -> str:
                     "token_valid_for_seconds": max(0, time_until_expiry),
                     "token_valid_for_hours": round(max(0, time_until_expiry) / 3600, 1),
                     "token_caching": cache_status,
+                    "write_access": write_status,
+                    "requested_scopes": SCOPES,
                     "cache_file_exists": cache_file_exists,
                     "cache_file_path": str(TOKEN_CACHE_FILE) if TOKEN_CACHE_ENABLED else "N/A"
                 }, indent=2)
@@ -381,13 +395,17 @@ async def check_authentication() -> str:
                     "status": "token_invalid",
                     "error": str(graph_error),
                     "message": "Token exists but API call failed - may need re-authentication",
-                    "token_caching": cache_status
+                    "token_caching": cache_status,
+                    "write_access": write_status,
+                    "requested_scopes": SCOPES
                 }, indent=2)
         else:
             return json.dumps({
                 "status": "not_authenticated",
                 "message": "No valid authentication token. Please call 'start_authentication'",
                 "token_caching": cache_status,
+                "write_access": write_status,
+                "requested_scopes": SCOPES,
                 "cache_file_exists": cache_file_exists
             }, indent=2)
             
@@ -395,7 +413,8 @@ async def check_authentication() -> str:
         return json.dumps({
             "status": "error",
             "error": str(e),
-            "token_caching": "unknown"
+            "token_caching": "unknown",
+            "write_access": "unknown"
         }, indent=2)
 
 async def make_graph_request(endpoint: str, method: str = "GET", data: Dict = None) -> Dict:
@@ -524,6 +543,9 @@ async def get_page_content(page_id: str) -> str:
         Page content as HTML or error message
     """
     try:
+        if not await ensure_valid_token():
+            return "Error getting page content: Not authenticated. Please call 'start_authentication' and 'complete_authentication' first."
+
         # Get page content (returns HTML)
         async with httpx.AsyncClient() as client:
             headers = {"Authorization": f"Bearer {access_token}"}
@@ -584,6 +606,8 @@ async def create_notebook(name: str, description: str = None) -> str:
         JSON string with the created notebook information
     """
     try:
+        require_write_access()
+
         data = {"displayName": name}
         if description:
             data["description"] = description
@@ -618,6 +642,8 @@ async def create_section(notebook_id: str, name: str) -> str:
         JSON string with the created section information
     """
     try:
+        require_write_access()
+
         data = {"displayName": name}
         
         section = await make_graph_request(
@@ -655,6 +681,12 @@ async def create_page(section_id: str, title: str, content_html: str = None) -> 
         JSON string with the created page information
     """
     try:
+        require_write_access()
+        if not await ensure_valid_token():
+            return "Error creating page: Not authenticated. Please call 'start_authentication' and 'complete_authentication' first."
+
+        escaped_title = escape(title)
+
         # Build the HTML structure for the page
         if content_html:
             # Ensure content is wrapped in proper OneNote HTML structure
@@ -663,12 +695,12 @@ async def create_page(section_id: str, title: str, content_html: str = None) -> 
 <!DOCTYPE html>
 <html>
 <head>
-    <title>{title}</title>
+    <title>{escaped_title}</title>
     <meta name="created" content="{time.strftime('%Y-%m-%dT%H:%M:%S.0000000')}" />
 </head>
 <body>
     <div>
-        <h1>{title}</h1>
+        <h1>{escaped_title}</h1>
         <div>{content_html}</div>
     </div>
 </body>
@@ -681,12 +713,12 @@ async def create_page(section_id: str, title: str, content_html: str = None) -> 
 <!DOCTYPE html>
 <html>
 <head>
-    <title>{title}</title>
+    <title>{escaped_title}</title>
     <meta name="created" content="{time.strftime('%Y-%m-%dT%H:%M:%S.0000000')}" />
 </head>
 <body>
     <div>
-        <h1>{title}</h1>
+        <h1>{escaped_title}</h1>
         <p>Page created by OneNote MCP Server</p>
     </div>
 </body>
@@ -740,6 +772,10 @@ async def update_page_content(page_id: str, content_html: str, target_element: s
         Status message
     """
     try:
+        require_write_access()
+        if not await ensure_valid_token():
+            return "Error updating page content: Not authenticated. Please call 'start_authentication' and 'complete_authentication' first."
+
         # OneNote PATCH API for updating page content
         patch_data = [
             {
@@ -779,7 +815,8 @@ def main():
     """Main entry point for the server."""
     # Log token caching configuration
     cache_status = "enabled" if TOKEN_CACHE_ENABLED else "disabled"
-    logger.info(f"OneNote MCP Server starting - Token caching: {cache_status}")
+    write_status = "enabled" if WRITE_ACCESS_ENABLED else "disabled"
+    logger.info(f"OneNote MCP Server starting - Token caching: {cache_status}, write access: {write_status}")
     
     if TOKEN_CACHE_ENABLED:
         logger.info(f"Token cache file: {TOKEN_CACHE_FILE}")
