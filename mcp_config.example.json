@@ -8,7 +8,7 @@
       "env": {
         "AZURE_CLIENT_ID": "YOUR_AZURE_CLIENT_ID_HERE",
         "ONENOTE_CACHE_TOKENS": "true",
-        "ONENOTE_TOKEN_CACHE_FILE": "/Users/fcagalj/SOFT_DEV/PROJECTS/BlockIncrement/personal-assistant/mcp-secrets/onenote/tokens.json",
+        "ONENOTE_TOKEN_CACHE_FILE": "/Users/fcagalj/SOFT_DEV/PROJECTS/BlockIncrement/personal-assistant/secrets/onenote/tokens.json",
         "ONENOTE_ENABLE_WRITE": "false"
       }
     }
